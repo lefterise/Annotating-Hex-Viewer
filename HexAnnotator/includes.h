@@ -2,13 +2,32 @@
 #include <string>
 #include <vector>
 
+static const COLORREF annotationColors[] = {
+    RGB(255, 0, 0),    // Red
+    RGB(0, 128, 0),    // Green
+    RGB(0, 0, 255),    // Blue
+    RGB(128, 0, 128),  // Purple
+    RGB(255, 165, 0),  // Orange
+    RGB(0, 128, 128)   // Teal
+};
+
 // Structure to store annotation information
 struct Annotation {
     int startOffset;
     int endOffset;
     std::string label;
     std::string displayFormat; // "hex", "int", "float", "ascii", etc.
-    COLORREF color;
+    int colorIndex;
+};
+
+struct AnnotationInfo {
+    bool isAnnotated;
+    std::string formattedValue;
+    int colorIndex;
+    int annotationLength;
+    int annotationStartOffset;
+    int annotationIndex;    // To identify which annotation this byte belongs to
+    int positionInRow;      // Position within this row (for multi-row annotations)
 };
 
 // Structure to represent the application state
@@ -26,6 +45,16 @@ struct DocumentWindowState {
     bool isAnnotating = false;
     std::string tempAnnotationLabel;
     std::string currentDisplayFormat = "hex";
+
+    std::vector<AnnotationInfo> annotationMap;
+    struct {
+        HFONT hFontHex;
+        HFONT hFontAnnotations;
+        HBRUSH selectionBrush;
+        HPEN grayPen;
+        HPEN annotationPen[6];
+    } gdi;
+
 };
 
 // Grid data types

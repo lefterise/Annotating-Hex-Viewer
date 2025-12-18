@@ -66,7 +66,7 @@ void OpenFileInNewWindow(HWND hWnd);
 void UpdateGridView(HWND hGridView, int offset, const std::vector<BYTE>& data);
 const char* GetDataTypeName(DataType type);
 std::string FormatDataAtOffset(const std::vector<BYTE>& data, int offset, DataType type);
-
+void tagBytesThatAreAnnotated(DocumentWindowState& state);
 
 bool SaveAnnotationsToFile(HWND hwnd, DocumentWindowState& state);
 bool LoadAnnotationsFromFile(HWND hwnd, DocumentWindowState& state);
@@ -751,7 +751,7 @@ bool SaveAnnotationsToFile(HWND hwnd, DocumentWindowState& state) {
             file.write(reinterpret_cast<const char*>(&anno.endOffset), sizeof(anno.endOffset));
 
             // Write color
-            file.write(reinterpret_cast<const char*>(&anno.color), sizeof(anno.color));
+            file.write(reinterpret_cast<const char*>(&anno.colorIndex), sizeof(anno.colorIndex));
 
             // Write label string
             int labelLength = static_cast<int>(anno.label.length());
@@ -861,7 +861,7 @@ bool LoadAnnotationsFromFile(HWND hwnd, DocumentWindowState& state) {
             }
 
             // Read color
-            file.read(reinterpret_cast<char*>(&anno.color), sizeof(anno.color));
+            file.read(reinterpret_cast<char*>(&anno.colorIndex), sizeof(anno.colorIndex));
 
             // Read label string
             int labelLength;
@@ -885,6 +885,7 @@ bool LoadAnnotationsFromFile(HWND hwnd, DocumentWindowState& state) {
 
         // If we got here without exceptions, update the state
         state.annotations = newAnnotations;
+        tagBytesThatAreAnnotated(state);
 
         // Redraw to show the loaded annotations
         if (g_hActiveHexViewer) {

@@ -29,6 +29,7 @@ void ShowContextMenu(HWND hwnd, int x, int y, DocumentWindowState& state);
 void CreateAnnotation(HWND hwnd, DocumentWindowState& state);
 void EditAnnotation(HWND hwnd, int index, DocumentWindowState& state);
 void ShowAnnotationInputDialog(HWND hwnd, char* buffer, int bufferSize, char* format, int formatSize);
+void tagBytesThatAreAnnotated(DocumentWindowState& state);
 
 //-------------------------------------------------------------------
 // Hex Viewer Window Procedure
@@ -73,7 +74,24 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
                 // Update window title
                 std::string title = "Hex View - " + pState->fileName;
                 SetWindowText(hwnd, title.c_str());
+                tagBytesThatAreAnnotated(*pState);
             }
+        }
+
+        pState->gdi.hFontHex = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, FIXED_PITCH | FF_DONTCARE, "Consolas");
+
+        pState->gdi.hFontAnnotations = CreateFont(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, FIXED_PITCH | FF_DONTCARE, "Segoe UI");
+
+        pState->gdi.selectionBrush = CreateSolidBrush(RGB(0, 120, 215));
+
+        pState->gdi.grayPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
+
+        for (int i = 0; i < std::size(annotationColors); ++i) {
+            pState->gdi.annotationPen[i] = CreatePen(PS_SOLID, 1, annotationColors[i]);
         }
 
         return 0;
@@ -198,7 +216,7 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             int col = -1;
             // Find the column by checking each byte position
             for (int i = 0; i < BYTES_PER_ROW; ++i) {
-                int byteStartX = HEX_MARGIN + i * HEX_BYTE_SPACING;
+                int byteStartX = HEX_MARGIN + i * HEX_BYTE_SPACING -5; //lef
                 int byteEndX = byteStartX + CHAR_WIDTH * 2;
                 if (x >= byteStartX && x < byteEndX) {
                     col = i;
@@ -252,7 +270,7 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             int col = -1;
             // Find the column by checking each byte position
             for (int i = 0; i < BYTES_PER_ROW; ++i) {
-                int byteStartX = HEX_MARGIN + i * HEX_BYTE_SPACING;
+                int byteStartX = HEX_MARGIN + i * HEX_BYTE_SPACING - 5; //lef
                 int byteEndX = byteStartX + CHAR_WIDTH * 2;
                 if (x >= byteStartX && x < byteEndX) {
                     col = i;
@@ -415,6 +433,7 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
             if (annotationIndex >= 0) {
                 EditAnnotation(hwnd, annotationIndex, *pState);
+                tagBytesThatAreAnnotated(*pState);
             }
             break;
         }
@@ -432,6 +451,7 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
             if (annotationIndex >= 0) {
                 pState->annotations.erase(pState->annotations.begin() + annotationIndex);
+                tagBytesThatAreAnnotated(*pState);
                 InvalidateRect(hwnd, NULL, TRUE);
             }
             break;
@@ -440,7 +460,9 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         case 2003: // Set format to Hex
         case 2004: // Set format to Int
         case 2005: // Set format to Float
-        case 2006: // Set format to Ascii
+        case 2006: // Set format to Double
+        case 2007: // Set format to Ascii
+        case 2008: // Set format to Unicode
         {
             int annotationIndex = -1;
             for (size_t i = 0; i < pState->annotations.size(); i++) {
@@ -457,17 +479,21 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
                 case 2003: pState->annotations[annotationIndex].displayFormat = "hex"; break;
                 case 2004: pState->annotations[annotationIndex].displayFormat = "int"; break;
                 case 2005: pState->annotations[annotationIndex].displayFormat = "float"; break;
-                case 2006: pState->annotations[annotationIndex].displayFormat = "ascii"; break;
+                case 2006: pState->annotations[annotationIndex].displayFormat = "double"; break;
+                case 2007: pState->annotations[annotationIndex].displayFormat = "ascii"; break;
+                case 2008: pState->annotations[annotationIndex].displayFormat = "unicode"; break;
                 }
+                tagBytesThatAreAnnotated(*pState);
 
                 InvalidateRect(hwnd, NULL, TRUE);
             }
             break;
         }
 
-        case 2007: // Create Annotation
+        case 2009: // Create Annotation
             if (pState->selectionStart >= 0 && pState->selectionEnd >= 0) {
                 CreateAnnotation(hwnd, *pState);
+                tagBytesThatAreAnnotated(*pState);
             }
             break;
         }
@@ -479,6 +505,14 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     {
         // Clean up this window's state
         if (pState) {
+            DeleteObject(pState->gdi.hFontHex);
+            DeleteObject(pState->gdi.hFontAnnotations);
+            DeleteObject(pState->gdi.selectionBrush);
+            DeleteObject(pState->gdi.grayPen);
+            for (int i = 0; i < std::size(annotationColors); ++i) {
+                DeleteObject(pState->gdi.annotationPen[i]);
+            }
+
             delete pState;
             windowStates.erase(hwnd);
         }
@@ -489,62 +523,7 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     return DefMDIChildProc(hwnd, msg, wParam, lParam);
 }
 
-void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
-    if (state.fileData.empty()) {
-        TextOut(hdc, 10, 10, "Open a file to start viewing.", 28);
-        return;
-    }
-
-    // Set up fonts
-    HFONT hFont = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY, FIXED_PITCH | FF_DONTCARE, "Consolas");
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-
-    // Setup colors
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, RGB(0, 0, 0));
-
-    // Draw the header
-    char headerText[50];
-    sprintf_s(headerText, sizeof(headerText), "Offset");
-    TextOut(hdc, 10, 0, headerText, strlen(headerText));
-
-    for (int i = 0; i < BYTES_PER_ROW; i++) {
-        sprintf_s(headerText, sizeof(headerText), "%02X", i);
-        TextOut(hdc, HEX_MARGIN + i * HEX_BYTE_SPACING, 0, headerText, strlen(headerText));
-    }
-
-    TextOut(hdc, ASCII_MARGIN, 0, "ASCII", 5);
-
-    HBRUSH selectionBrush = CreateSolidBrush(RGB(0, 120, 215));
-
-    // Draw a separator line between header and data
-    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
-    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-    MoveToEx(hdc, 0, ROW_HEIGHT - 2, NULL);
-    LineTo(hdc, ASCII_MARGIN + BYTES_PER_ROW * CHAR_WIDTH + 50, ROW_HEIGHT - 2);
-    SelectObject(hdc, hOldPen);
-    DeleteObject(hPen);
-
-    // Calculate the visible range
-    RECT clientRect;
-    GetClientRect(hwnd, &clientRect);
-    int visibleRows = (clientRect.bottom - ROW_HEIGHT) / ROW_HEIGHT;
-    int startRow = state.scrollPosition;
-    int endRow = std::min(startRow + visibleRows, state.totalRows);
-
-    // Prepare a map to track which bytes are annotated and their formatted values
-    struct AnnotationInfo {
-        bool isAnnotated;
-        std::string formattedValue;
-        COLORREF color;
-        int annotationLength;
-        int annotationStartOffset;
-        int annotationIndex;    // To identify which annotation this byte belongs to
-        int positionInRow;      // Position within this row (for multi-row annotations)
-    };
-
+void tagBytesThatAreAnnotated(DocumentWindowState& state) {
     std::vector<AnnotationInfo> annotationMap(state.fileData.size(), { false, "", RGB(0,0,0), 0, 0, -1, 0 });
 
     // Pre-populate annotation information for ASCII section formatting
@@ -571,7 +550,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
             annotationMap[i] = {
                 true,
                 formattedValue,
-                anno.color,
+                anno.colorIndex,
                 anno.endOffset - anno.startOffset + 1,
                 anno.startOffset,
                 static_cast<int>(annoIdx),
@@ -579,6 +558,48 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
             };
         }
     }
+    state.annotationMap = std::move(annotationMap);
+}
+
+
+void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
+    if (state.fileData.empty()) {
+        TextOut(hdc, 10, 10, "Open a file to start viewing.", 28);
+        return;
+    }
+
+    // Set up fonts
+
+    HFONT hOldFont = (HFONT)SelectObject(hdc, state.gdi.hFontHex);
+
+    // Setup colors
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(0, 0, 0));
+
+    // Draw the header
+    char headerText[50];
+    sprintf_s(headerText, sizeof(headerText), "Offset");
+    TextOut(hdc, 10, 0, headerText, strlen(headerText));
+
+    for (int i = 0; i < BYTES_PER_ROW; i++) {
+        sprintf_s(headerText, sizeof(headerText), "%02X", i);
+        TextOut(hdc, HEX_MARGIN + i * HEX_BYTE_SPACING, 0, headerText, strlen(headerText));
+    }
+
+    TextOut(hdc, ASCII_MARGIN, 0, "ASCII", 5);
+
+    // Draw a separator line between header and data
+    HPEN hOldPen = (HPEN)SelectObject(hdc, state.gdi.grayPen);
+    MoveToEx(hdc, 0, ROW_HEIGHT - 2, NULL);
+    LineTo(hdc, ASCII_MARGIN + BYTES_PER_ROW * CHAR_WIDTH + 50, ROW_HEIGHT - 2);
+    SelectObject(hdc, hOldPen);
+
+    // Calculate the visible range
+    RECT clientRect;
+    GetClientRect(hwnd, &clientRect);
+    int visibleRows = (clientRect.bottom - ROW_HEIGHT) / ROW_HEIGHT;
+    int startRow = state.scrollPosition;
+    int endRow = std::min(startRow + visibleRows, state.totalRows);
 
     // Draw each row
     for (int row = startRow; row < endRow; row++) {
@@ -608,7 +629,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                 }
 
                 // Check if this byte is in any annotation
-                bool isAnnotated = annotationMap[offset].isAnnotated;
+                bool isAnnotated = state.annotationMap[offset].isAnnotated;
 
                 // Prepare rectangle for selection background
                 RECT hexRect = {
@@ -630,7 +651,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                     // Draw selection background for hex
                     SetBkColor(hdc, RGB(0, 120, 215));
                     SetBkMode(hdc, OPAQUE);
-                    FillRect(hdc, &hexRect, selectionBrush);
+                    FillRect(hdc, &hexRect, state.gdi.selectionBrush);
                     SetTextColor(hdc, RGB(255, 255, 255));
                 }
                 else if (isAnnotated) {
@@ -660,7 +681,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                 if (isSelected) {
                     // Store this character to draw later
                     char asciiChar = (byte >= 32 && byte <= 126) ? static_cast<char>(byte) : '.';
-                    FillRect(hdc, &asciiRect, selectionBrush);
+                    FillRect(hdc, &asciiRect, state.gdi.selectionBrush);
                     SetTextColor(hdc, RGB(255, 255, 255));
                     char aChar[2] = { asciiChar, 0 };
                     TextOut(hdc, ASCII_MARGIN + col * CHAR_WIDTH, yPos, aChar, 1);
@@ -680,16 +701,16 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
         for (int col = 0; col < BYTES_PER_ROW && offsetBase + col < state.fileData.size(); col++) {
             int offset = offsetBase + col;
 
-            if (annotationMap[offset].isAnnotated && !drawnInAscii[col]) {
-                int annoIdx = annotationMap[offset].annotationIndex;
-                int startRow = annotationMap[offset].annotationStartOffset / BYTES_PER_ROW;
+            if (state.annotationMap[offset].isAnnotated && !drawnInAscii[col]) {
+                int annoIdx = state.annotationMap[offset].annotationIndex;
+                int startRow = state.annotationMap[offset].annotationStartOffset / BYTES_PER_ROW;
                 int currentRow = offset / BYTES_PER_ROW;
-                int posInRow = annotationMap[offset].positionInRow;
+                int posInRow = state.annotationMap[offset].positionInRow;
 
                 // Get the annotation this byte belongs to
                 if (annoIdx >= 0 && annoIdx < state.annotations.size()) {
                     const auto& anno = state.annotations[annoIdx];
-                    std::string value = annotationMap[offset].formattedValue;
+                    std::string value = state.annotationMap[offset].formattedValue;
 
                     // Handle multi-row annotations
                     if (startRow != currentRow) {
@@ -711,7 +732,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                                 int maxLength = std::min(static_cast<int>(remainingValue.length()), BYTES_PER_ROW - col);
                                 if (maxLength > 0) {
                                     // Draw continuation of the value
-                                    SetTextColor(hdc, annotationMap[offset].color);
+                                    SetTextColor(hdc, annotationColors[state.annotationMap[offset].colorIndex]);
                                     TextOut(hdc, ASCII_MARGIN + col * CHAR_WIDTH, yPos, remainingValue.c_str(), maxLength);
 
                                     // Mark these positions as drawn
@@ -725,7 +746,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                     // For the first row of the annotation or single-row annotations
                     else if (offset == anno.startOffset) {
                         // Display the formatted value in the ASCII section
-                        SetTextColor(hdc, annotationMap[offset].color);
+                        SetTextColor(hdc, annotationColors[state.annotationMap[offset].colorIndex]);
 
                         // Ensure the value fits in the row
                         int maxLength = std::min(static_cast<int>(value.length()), BYTES_PER_ROW - col);
@@ -760,11 +781,53 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
             }
         }
     }
-    DeleteObject(selectionBrush);
 
     // Clean up
     SelectObject(hdc, hOldFont);
-    DeleteObject(hFont);
+}
+
+void drawLeftRoundedRect(HDC hdc, int startX, int startY, int endX, int endY) {
+    // Top horizontal line
+    MoveToEx(hdc, startX + 5, startY, NULL);
+    LineTo(hdc, endX, startY);
+
+    // Top-left corner arc
+    Arc(hdc, startX, startY, startX + 10, startY + 10,
+        startX + 5, startY, startX, startY + 5);
+
+    // Left vertical line
+    MoveToEx(hdc, startX, startY + 5, NULL);
+    LineTo(hdc, startX, endY - 5);
+
+    // Bottom-left corner arc
+    Arc(hdc, startX, endY - 10, startX + 10, endY,
+        startX, endY - 5, startX + 5, endY);
+
+    // Bottom horizontal line
+    MoveToEx(hdc, startX + 5, endY, NULL);
+    LineTo(hdc, endX, endY);
+}
+
+void drawRightRoundedRect(HDC hdc, int startX, int startY, int endX, int endY) {
+    // Top horizontal line
+    MoveToEx(hdc, startX, startY, NULL);
+    LineTo(hdc, endX - 5, startY);
+
+    // Top-right corner arc
+    Arc(hdc, endX - 10, startY, endX, startY + 10,
+        endX, startY + 5, endX - 5, startY);
+
+    // Right vertical line
+    MoveToEx(hdc, endX, startY + 5, NULL);
+    LineTo(hdc, endX, endY - 5);
+
+    // Bottom-right corner arc
+    Arc(hdc, endX - 10, endY - 10, endX, endY,
+        endX - 5, endY, endX, endY - 5);
+
+    // Bottom horizontal line
+    MoveToEx(hdc, startX, endY, NULL);
+    LineTo(hdc, endX - 5, endY);
 }
 
 void DrawAnnotations(HWND hwnd, HDC hdc, DocumentWindowState& state) {
@@ -772,10 +835,8 @@ void DrawAnnotations(HWND hwnd, HDC hdc, DocumentWindowState& state) {
         return;
     }
 
-    HFONT hFont = CreateFont(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY, FIXED_PITCH | FF_DONTCARE, "Segoe UI");
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+
+    HFONT hOldFont = (HFONT)SelectObject(hdc, state.gdi.hFontAnnotations);
 
     for (const auto& anno : state.annotations) {
         int startRow = anno.startOffset / BYTES_PER_ROW;
@@ -790,8 +851,7 @@ void DrawAnnotations(HWND hwnd, HDC hdc, DocumentWindowState& state) {
         }
 
         // Create pen for drawing
-        HPEN hPen = CreatePen(PS_SOLID, 1, anno.color);
-        HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+        HPEN hOldPen = (HPEN)SelectObject(hdc, state.gdi.annotationPen[anno.colorIndex]);
         HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
 
         // Handle multi-row annotations by drawing separate rectangles for each row
@@ -825,47 +885,8 @@ void DrawAnnotations(HWND hwnd, HDC hdc, DocumentWindowState& state) {
             if (startRow != endRow) {
                 // First row - draw top, left with arcs, and bottom
                 if (isFirstRow) {
-                    // HEX SECTION - First row outline
-                    // Top horizontal line
-                    MoveToEx(hdc, hexStartX + 5, startY, NULL);
-                    LineTo(hdc, hexEndX, startY);
-
-                    // Top-left corner arc - connected to the left vertical line
-                    MoveToEx(hdc, hexStartX, startY + 5, NULL); // Starting point for the vertical line
-                    Arc(hdc, hexStartX, startY, hexStartX + 10, startY + 10,
-                        hexStartX + 5, startY, hexStartX, startY + 5);
-
-                    // Left vertical line (continued from the arc)
-                    LineTo(hdc, hexStartX, endY - 5);
-
-                    // Bottom-left corner arc - connected to bottom horizontal
-                    Arc(hdc, hexStartX, endY - 10, hexStartX + 10, endY,
-                        hexStartX, endY - 5, hexStartX + 5, endY);
-
-                    // Bottom horizontal line (continued from the arc)
-                    MoveToEx(hdc, hexStartX + 5, endY, NULL);
-                    LineTo(hdc, hexEndX, endY);
-
-                    // ASCII SECTION - First row outline
-                    // Top horizontal line
-                    MoveToEx(hdc, asciiStartX + 5, startY, NULL);
-                    LineTo(hdc, asciiEndX, startY);
-
-                    // Top-left corner arc - connected to the left vertical line
-                    MoveToEx(hdc, asciiStartX, startY + 5, NULL); // Starting point for the vertical line
-                    Arc(hdc, asciiStartX, startY, asciiStartX + 10, startY + 10,
-                        asciiStartX + 5, startY, asciiStartX, startY + 5);
-
-                    // Left vertical line (continued from the arc)
-                    LineTo(hdc, asciiStartX, endY - 5);
-
-                    // Bottom-left corner arc - connected to bottom horizontal
-                    Arc(hdc, asciiStartX, endY - 10, asciiStartX + 10, endY,
-                        asciiStartX, endY - 5, asciiStartX + 5, endY);
-
-                    // Bottom horizontal line (continued from the arc)
-                    MoveToEx(hdc, asciiStartX + 5, endY, NULL);
-                    LineTo(hdc, asciiEndX, endY);
+                    drawLeftRoundedRect(hdc, hexStartX,   startY, hexEndX,   endY);
+                    drawLeftRoundedRect(hdc, asciiStartX, startY, asciiEndX, endY);
                 }
                 // Middle rows - just horizontal lines on top and bottom
                 else if (isMiddleRow) {
@@ -890,46 +911,8 @@ void DrawAnnotations(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                 // Last row - draw top, right with arcs, and bottom
                 else if (isLastRow) {
                     // HEX SECTION - Last row outline
-                    // Top horizontal line
-                    MoveToEx(hdc, hexStartX, startY, NULL);
-                    LineTo(hdc, hexEndX - 5, startY);
-
-                    // Top-right corner arc - connected to right vertical line
-                    MoveToEx(hdc, hexEndX, startY + 5, NULL); // Starting point for vertical line
-                    Arc(hdc, hexEndX - 10, startY, hexEndX, startY + 10,
-                        hexEndX, startY + 5, hexEndX - 5, startY);
-
-                    // Right vertical line (continued from arc)
-                    LineTo(hdc, hexEndX, endY - 5);
-
-                    // Bottom-right corner arc - connected to bottom horizontal
-                    Arc(hdc, hexEndX - 10, endY - 10, hexEndX, endY,
-                        hexEndX - 5, endY, hexEndX, endY - 5);
-
-                    // Bottom horizontal line
-                    MoveToEx(hdc, hexStartX, endY, NULL);
-                    LineTo(hdc, hexEndX - 5, endY);
-
-                    // ASCII SECTION - Last row outline
-                    // Top horizontal line
-                    MoveToEx(hdc, asciiStartX, startY, NULL);
-                    LineTo(hdc, asciiEndX - 5, startY);
-
-                    // Top-right corner arc - connected to right vertical line
-                    MoveToEx(hdc, asciiEndX, startY + 5, NULL); // Starting point for vertical line
-                    Arc(hdc, asciiEndX - 10, startY, asciiEndX, startY + 10,
-                        asciiEndX, startY + 5, asciiEndX - 5, startY);
-
-                    // Right vertical line (continued from arc)
-                    LineTo(hdc, asciiEndX, endY - 5);
-
-                    // Bottom-right corner arc - connected to bottom horizontal
-                    Arc(hdc, asciiEndX - 10, endY - 10, asciiEndX, endY,
-                        asciiEndX - 5, endY, asciiEndX, endY - 5);
-
-                    // Bottom horizontal line
-                    MoveToEx(hdc, asciiStartX, endY, NULL);
-                    LineTo(hdc, asciiEndX - 5, endY);
+                    drawRightRoundedRect(hdc, hexStartX,   startY,    hexEndX, endY);
+                    drawRightRoundedRect(hdc, asciiStartX, startY, asciiEndX, endY);
                 }
             }
             else {
@@ -940,7 +923,7 @@ void DrawAnnotations(HWND hwnd, HDC hdc, DocumentWindowState& state) {
 
             // Draw the label - only on the first visible row
             if (row == startRow || (startRow < state.scrollPosition && row == state.scrollPosition)) {
-                SetTextColor(hdc, anno.color);
+                SetTextColor(hdc, annotationColors[anno.colorIndex]);
                 SetBkMode(hdc, TRANSPARENT);
                 TextOut(hdc, hexStartX, startY - 11, anno.label.c_str(), anno.label.length());
             }
@@ -963,11 +946,9 @@ void DrawAnnotations(HWND hwnd, HDC hdc, DocumentWindowState& state) {
         // Cleanup
         SelectObject(hdc, hOldPen);
         SelectObject(hdc, hOldBrush);
-        DeleteObject(hPen);
     }
 
     SelectObject(hdc, hOldFont);
-    DeleteObject(hFont);
 }
 //-------------------------------------------------------------------
 // ShowContextMenu - Display context menu for annotations
@@ -1000,16 +981,20 @@ void ShowContextMenu(HWND hwnd, int x, int y, DocumentWindowState& state) {
         UINT hexFlags = MF_STRING | (currentFormat == "hex" ? MF_CHECKED : MF_UNCHECKED);
         UINT intFlags = MF_STRING | (currentFormat == "int" ? MF_CHECKED : MF_UNCHECKED);
         UINT floatFlags = MF_STRING | (currentFormat == "float" ? MF_CHECKED : MF_UNCHECKED);
+        UINT doubleFlags = MF_STRING | (currentFormat == "double" ? MF_CHECKED : MF_UNCHECKED);
         UINT asciiFlags = MF_STRING | (currentFormat == "ascii" ? MF_CHECKED : MF_UNCHECKED);
+        UINT unicodeFlags = MF_STRING | (currentFormat == "unicode" ? MF_CHECKED : MF_UNCHECKED);
 
         AppendMenu(hPopupMenu, hexFlags, 2003, "Hex");
         AppendMenu(hPopupMenu, intFlags, 2004, "Int");
         AppendMenu(hPopupMenu, floatFlags, 2005, "Float");
-        AppendMenu(hPopupMenu, asciiFlags, 2006, "Ascii");
+        AppendMenu(hPopupMenu, doubleFlags, 2006, "Double");
+        AppendMenu(hPopupMenu, asciiFlags, 2007, "Ascii");
+        AppendMenu(hPopupMenu, unicodeFlags, 2008, "Unicode");
     }
     else if (state.selectionStart >= 0 && state.selectionEnd >= 0) {
         // There's an active selection - show create option
-        AppendMenu(hPopupMenu, MF_STRING, 2007, "Create Annotation");
+        AppendMenu(hPopupMenu, MF_STRING, 2009, "Create Annotation");
     }
     else {
         // No annotation or selection - no context menu needed
@@ -1079,6 +1064,16 @@ std::string FormatData(const std::vector<BYTE>& data, int offset, int length, co
             ss << "Insufficient bytes";
         }
     }
+    else if (format == "double") {
+        if (length >= 8) {
+            double value;
+            memcpy(&value, &data[offset], sizeof(double));
+            ss << std::fixed << std::setprecision(6) << value;
+        }
+        else {
+            ss << "Insufficient bytes";
+        }
+    }
     else if (format == "ascii") {
         for (int i = 0; i < length; ++i) {
             BYTE byte = data[offset + i];
@@ -1090,7 +1085,17 @@ std::string FormatData(const std::vector<BYTE>& data, int offset, int length, co
             }
         }
     }
-
+    else if (format == "unicode") {
+        for (int i = 0; i < length; i += 2) {
+            BYTE byte = data[offset + i];
+            if (byte >= 32 && byte <= 126) {
+                ss << static_cast<char>(byte);
+            }
+            else {
+                ss << '.';
+            }
+        }
+    }
     return ss.str();
 }
 
@@ -1118,17 +1123,7 @@ void CreateAnnotation(HWND hwnd, DocumentWindowState& state) {
         newAnnotation.label = labelBuffer;
         newAnnotation.displayFormat = formatBuffer; // Use the selected format
 
-        // Choose a color based on the annotation index
-        static const COLORREF colors[] = {
-            RGB(255, 0, 0),    // Red
-            RGB(0, 128, 0),    // Green
-            RGB(0, 0, 255),    // Blue
-            RGB(128, 0, 128),  // Purple
-            RGB(255, 165, 0),  // Orange
-            RGB(0, 128, 128)   // Teal
-        };
-
-        newAnnotation.color = colors[state.annotations.size() % 6];
+        newAnnotation.colorIndex = state.annotations.size() % std::size(annotationColors);
 
         state.annotations.push_back(newAnnotation);
         state.isAnnotating = false;
