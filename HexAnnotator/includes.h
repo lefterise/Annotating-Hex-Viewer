@@ -21,13 +21,61 @@ struct Annotation {
 };
 
 struct AnnotationInfo {
-    bool isAnnotated;
     std::string formattedValue;
     int colorIndex;
-    int annotationLength;
-    int annotationStartOffset;
+    int length;
+    int startOffset;
     int annotationIndex;    // To identify which annotation this byte belongs to
-    int positionInRow;      // Position within this row (for multi-row annotations)
+
+    int positionInRow(int i) const{
+        const int BYTES_PER_ROW = 16;
+        int row = i / BYTES_PER_ROW;
+        int startRow = startOffset / BYTES_PER_ROW;
+        if (row == startRow) {
+            // First row - position starts from the column of first byte
+            return i - startOffset;
+        }
+        else {
+            // Subsequent rows - position starts from 0 relative to this row
+            return i % BYTES_PER_ROW;
+        }
+    }
+};
+
+struct ByteRange {
+    int start;
+    int end;
+    AnnotationInfo info;
+
+    bool operator<(const ByteRange& other) const {
+        return start < other.start ||
+            (start == other.start && end < other.end);
+    }
+};
+
+struct ByteMap {
+    const AnnotationInfo* at(size_t byteOffset) const
+    {
+        auto it = std::upper_bound(
+            ranges.begin(),
+            ranges.end(),
+            byteOffset,
+            [](size_t value, const ByteRange& r) {
+                return value < r.start;
+            });
+
+        if (it == ranges.begin())
+            return nullptr;
+
+        --it;
+
+        if (byteOffset <= it->end)
+            return &it->info;
+
+        return nullptr;
+    }
+
+    std::vector<ByteRange> ranges;
 };
 
 // Structure to represent the application state
@@ -46,7 +94,7 @@ struct DocumentWindowState {
     std::string tempAnnotationLabel;
     std::string currentDisplayFormat = "hex";
 
-    std::vector<AnnotationInfo> annotationMap;
+    ByteMap annotationMap;
     struct {
         HFONT hFontHex;
         HFONT hFontAnnotations;

@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 #include "includes.h"
 
 // Constants for visualization - adjusted for better spacing
@@ -524,42 +525,32 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 }
 
 void tagBytesThatAreAnnotated(DocumentWindowState& state) {
-    std::vector<AnnotationInfo> annotationMap(state.fileData.size(), { false, "", RGB(0,0,0), 0, 0, -1, 0 });
+    std::vector<ByteRange> byteTags;
+    byteTags.reserve(state.annotations.size());
 
     // Pre-populate annotation information for ASCII section formatting
     for (size_t annoIdx = 0; annoIdx < state.annotations.size(); annoIdx++) {
         const auto& anno = state.annotations[annoIdx];
-        std::string formattedValue = FormatData(state.fileData, anno.startOffset,
-            anno.endOffset - anno.startOffset + 1, anno.displayFormat);
-
-        // Mark all bytes in this annotation
-        for (int i = anno.startOffset; i <= anno.endOffset && i < state.fileData.size(); i++) {
-            int row = i / BYTES_PER_ROW;
-            int startRow = anno.startOffset / BYTES_PER_ROW;
-            int posInRow = 0;
-
-            if (row == startRow) {
-                // First row - position starts from the column of first byte
-                posInRow = i - anno.startOffset;
-            }
-            else {
-                // Subsequent rows - position starts from 0 relative to this row
-                posInRow = i % BYTES_PER_ROW;
-            }
-
-            annotationMap[i] = {
-                true,
+        std::string formattedValue = FormatData(state.fileData, anno.startOffset, anno.endOffset - anno.startOffset + 1, anno.displayFormat);
+        
+        byteTags.push_back(ByteRange{
+            .start = anno.startOffset,
+            .end = anno.endOffset,
+            .info = {
                 formattedValue,
                 anno.colorIndex,
                 anno.endOffset - anno.startOffset + 1,
                 anno.startOffset,
-                static_cast<int>(annoIdx),
-                posInRow
-            };
-        }
+                static_cast<int>(annoIdx)
+            }
+        });
     }
-    state.annotationMap = std::move(annotationMap);
+
+    std::sort(byteTags.begin(), byteTags.end());
+
+    state.annotationMap.ranges = std::move(byteTags);
 }
+
 
 
 void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
@@ -629,7 +620,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                 }
 
                 // Check if this byte is in any annotation
-                bool isAnnotated = state.annotationMap[offset].isAnnotated;
+                bool isAnnotated = state.annotationMap.at(offset) != nullptr;
 
                 // Prepare rectangle for selection background
                 RECT hexRect = {
@@ -701,16 +692,18 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
         for (int col = 0; col < BYTES_PER_ROW && offsetBase + col < state.fileData.size(); col++) {
             int offset = offsetBase + col;
 
-            if (state.annotationMap[offset].isAnnotated && !drawnInAscii[col]) {
-                int annoIdx = state.annotationMap[offset].annotationIndex;
-                int startRow = state.annotationMap[offset].annotationStartOffset / BYTES_PER_ROW;
+            auto annotation = state.annotationMap.at(offset);
+
+            if (annotation && !drawnInAscii[col]) {
+                int annoIdx = annotation->annotationIndex;
+                int startRow = annotation->startOffset / BYTES_PER_ROW;
                 int currentRow = offset / BYTES_PER_ROW;
-                int posInRow = state.annotationMap[offset].positionInRow;
+                int posInRow = annotation->positionInRow(offset);
 
                 // Get the annotation this byte belongs to
                 if (annoIdx >= 0 && annoIdx < state.annotations.size()) {
                     const auto& anno = state.annotations[annoIdx];
-                    std::string value = state.annotationMap[offset].formattedValue;
+                    std::string value = annotation->formattedValue;
 
                     // Handle multi-row annotations
                     if (startRow != currentRow) {
@@ -732,7 +725,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                                 int maxLength = std::min(static_cast<int>(remainingValue.length()), BYTES_PER_ROW - col);
                                 if (maxLength > 0) {
                                     // Draw continuation of the value
-                                    SetTextColor(hdc, annotationColors[state.annotationMap[offset].colorIndex]);
+                                    SetTextColor(hdc, annotationColors[annotation->colorIndex]);
                                     TextOut(hdc, ASCII_MARGIN + col * CHAR_WIDTH, yPos, remainingValue.c_str(), maxLength);
 
                                     // Mark these positions as drawn
@@ -746,7 +739,7 @@ void DrawHexView(HWND hwnd, HDC hdc, DocumentWindowState& state) {
                     // For the first row of the annotation or single-row annotations
                     else if (offset == anno.startOffset) {
                         // Display the formatted value in the ASCII section
-                        SetTextColor(hdc, annotationColors[state.annotationMap[offset].colorIndex]);
+                        SetTextColor(hdc, annotationColors[annotation->colorIndex]);
 
                         // Ensure the value fits in the row
                         int maxLength = std::min(static_cast<int>(value.length()), BYTES_PER_ROW - col);
