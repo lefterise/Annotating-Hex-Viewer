@@ -213,7 +213,9 @@ INT_PTR CALLBACK InputDialogProc(HWND hwndDlg, UINT message, WPARAM wParam, LPAR
         SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)"hex");
         SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)"int");
         SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)"float");
+        SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)"double");
         SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)"ascii");
+        SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)"unicode");
 
         // Select the current format if provided
         if (pFormat && pFormat[0] != '\0') {
@@ -221,7 +223,9 @@ INT_PTR CALLBACK InputDialogProc(HWND hwndDlg, UINT message, WPARAM wParam, LPAR
             if (strcmp(pFormat, "hex") == 0) index = 0;
             else if (strcmp(pFormat, "int") == 0) index = 1;
             else if (strcmp(pFormat, "float") == 0) index = 2;
-            else if (strcmp(pFormat, "ascii") == 0) index = 3;
+            else if (strcmp(pFormat, "double") == 0) index = 3;
+            else if (strcmp(pFormat, "ascii") == 0) index = 4;
+            else if (strcmp(pFormat, "unicode") == 0) index = 5;
 
             if (index >= 0) {
                 SendMessage(hCombo, CB_SETCURSEL, index, 0);
@@ -267,7 +271,9 @@ INT_PTR CALLBACK InputDialogProc(HWND hwndDlg, UINT message, WPARAM wParam, LPAR
                 case 0: strcpy_s(pFormat, formatSize, "hex"); break;
                 case 1: strcpy_s(pFormat, formatSize, "int"); break;
                 case 2: strcpy_s(pFormat, formatSize, "float"); break;
-                case 3: strcpy_s(pFormat, formatSize, "ascii"); break;
+                case 3: strcpy_s(pFormat, formatSize, "double"); break;
+                case 4: strcpy_s(pFormat, formatSize, "ascii"); break;
+                case 5: strcpy_s(pFormat, formatSize, "unicode"); break;
                 default: strcpy_s(pFormat, formatSize, "hex"); break;
                 }
             }

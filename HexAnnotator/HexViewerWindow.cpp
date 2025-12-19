@@ -31,7 +31,7 @@ void CreateAnnotation(HWND hwnd, DocumentWindowState& state);
 void EditAnnotation(HWND hwnd, int index, DocumentWindowState& state);
 void ShowAnnotationInputDialog(HWND hwnd, char* buffer, int bufferSize, char* format, int formatSize);
 void tagBytesThatAreAnnotated(DocumentWindowState& state);
-
+void UpdateStatusbar(int offset, int length);
 //-------------------------------------------------------------------
 // Hex Viewer Window Procedure
 //-------------------------------------------------------------------
@@ -245,7 +245,7 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
             // Update the grid view with the new selection
             UpdateGridView(g_hGridView, offset, pState->fileData);
-
+            UpdateStatusbar(offset, 1);
             InvalidateRect(hwnd, NULL, TRUE);
         }
 
@@ -298,7 +298,7 @@ LRESULT CALLBACK HexViewerProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             int gridViewOffset = std::min(pState->selectionStart, pState->selectionEnd); // pState->cursorPosition;
             // Update grid view with new selection
             UpdateGridView(g_hGridView, gridViewOffset, pState->fileData);
-
+            UpdateStatusbar(gridViewOffset, abs(pState->selectionEnd - pState->selectionStart)+1);
             InvalidateRect(hwnd, NULL, TRUE);
         }
 
@@ -1032,10 +1032,16 @@ std::string FormatData(const std::vector<BYTE>& data, int offset, int length, co
             memcpy(&value, &data[offset], sizeof(int16_t));
             ss << value;
         }
-        else if (length >= 4) {
+        else if (length == 4) {
             // 32-bit integer
             int32_t value = 0;
             memcpy(&value, &data[offset], sizeof(int32_t));
+            ss << value;
+        }
+        else if (length == 8) {
+            // 64-bit integer
+            int64_t value = 0;
+            memcpy(&value, &data[offset], sizeof(int64_t));
             ss << value;
         }
         else {

@@ -52,6 +52,7 @@ HWND g_hMainWindow;
 HWND g_hMDIClient;
 HWND g_hDockWindow;
 HWND g_hGridView;
+HWND g_hStatusbar;
 HWND g_hActiveHexViewer = NULL;
 int g_dockWidth = 250;
 
@@ -179,6 +180,22 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
         SetMenu(hwnd, hMenu);
 
+        g_hStatusbar = CreateWindowEx(
+            0,
+            STATUSCLASSNAME,
+            NULL,
+            WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
+            0, 0, 0, 0,
+            hwnd,          // MDI FRAME window
+            (HMENU)1,
+            GetModuleHandle(NULL),
+            NULL
+        );
+        int parts[] = { 150, 300, -1 };
+        SendMessage(g_hStatusbar, SB_SETPARTS, 3, (LPARAM)parts);
+
+
+
         // Create the dock window on the right side
         hDockWindow = CreateDockWindow(hwnd);
         g_hDockWindow = hDockWindow;
@@ -211,9 +228,16 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         int width = LOWORD(lParam);
         int height = HIWORD(lParam);
 
+        SendMessage(g_hStatusbar, WM_SIZE, 0, 0);
+
+        RECT rcStatus;
+        GetWindowRect(g_hStatusbar, &rcStatus);
+
+        int statusHeight = rcStatus.bottom - rcStatus.top;
+
         // Resize the MDI client window and the dock window
-        MoveWindow(g_hMDIClient, 0, 0, width - g_dockWidth, height, TRUE);
-        MoveWindow(g_hDockWindow, width - g_dockWidth, 0, g_dockWidth, height, TRUE);
+        MoveWindow(g_hMDIClient, 0, 0, width - g_dockWidth, height - statusHeight, TRUE);
+        MoveWindow(g_hDockWindow, width - g_dockWidth, 0, g_dockWidth, height - statusHeight, TRUE);
         return 0;
     }
 
@@ -291,6 +315,13 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     return DefFrameProc(hwnd, g_hMDIClient, msg, wParam, lParam);
 }
 
+void UpdateStatusbar(int offset, int length) {
+    char buffer[32];
+    sprintf_s(buffer, "Offset: %d", offset);
+    SendMessage(g_hStatusbar, SB_SETTEXT, 0, (LPARAM)buffer);
+    sprintf_s(buffer, "Length: %d", length);
+    SendMessage(g_hStatusbar, SB_SETTEXT, 1, (LPARAM)buffer);
+}
 
 
 //-------------------------------------------------------------------
